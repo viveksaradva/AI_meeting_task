@@ -1,0 +1,8 @@
+.env
+**/__pycache__/
+*.mp3
+*.m4a
+*.json
+*.zip
+uploads/
+diar_infer_telephonic.yaml
