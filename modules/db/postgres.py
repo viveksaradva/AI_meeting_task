@@ -41,8 +41,8 @@ def insert_transcript(transcript: List[Dict], meeting_id: str = None):
     logger.info(f"Inserting transcript for meeting_id: {meeting_id}")
 
     query = """
-    INSERT INTO meeting_transcripts (meeting_id, speaker_label, utterance)
-    VALUES (%s, %s, %s)
+    INSERT INTO meeting_transcripts (meeting_id, speaker_label, utterance, start, "end")
+    VALUES (%s, %s, %s, %s, %s)
     """
 
     with get_connection() as conn:
@@ -52,7 +52,9 @@ def insert_transcript(transcript: List[Dict], meeting_id: str = None):
                 cursor.execute(query, (
                     meeting_id,
                     entry.get("speaker"),
-                    entry.get("utterance")
+                    entry.get("utterance"),
+                    entry.get("start"),
+                    entry.get("end")
                 ))
             except Exception as e:
                 logger.error(f"Insert failed for entry {entry}: {e}")
@@ -60,3 +62,38 @@ def insert_transcript(transcript: List[Dict], meeting_id: str = None):
 
     logger.info(f"Inserted {len(transcript)} rows for meeting {meeting_id}")
     return meeting_id
+
+def retrieve_transcript(meeting_id: str) -> List[Dict]:
+    """
+    Retrieves transcript from the `meeting_transcripts` table for a given meeting_id.
+
+    Returns a list of dictionaries with keys: 'speaker', 'start', 'end', 'utterance'.
+    """
+    query = """
+    SELECT speaker_label, start, "end", utterance
+    FROM meeting_transcripts
+    WHERE meeting_id = %s
+    """
+
+    transcript = []
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute(query, (meeting_id,))
+            rows = cursor.fetchall()
+            for row in rows:
+                transcript.append({
+                    'speaker': row[0],
+                    'start': row[1],
+                    'end': row[2],
+                    'utterance': row[3]
+                })
+        except Exception as e:
+            logger.error(f"Retrieval failed for meeting_id {meeting_id}: {e}")
+        cursor.close()
+
+    logger.info(f"Retrieved {len(transcript)} rows for meeting {meeting_id}")
+    return transcript
+
+if __name__ == "__main__":
+    print(retrieve_transcript(meeting_id="8753b367-ae49-4763-a860-64663b34ef83"))

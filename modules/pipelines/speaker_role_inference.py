@@ -14,7 +14,7 @@ class SpeakerRoleInferencePipeline:
         role_mapping = self.identify_roles(samples)
         enriched_transcript = self.label_full_transcript(transcript, role_mapping)
         self.insert_to_db(enriched_transcript)
-        return role_mapping
+        return enriched_transcript
 
     def diarize_and_transcribe(self, audio_path):
         return SpeechProcessingPipeline(audio_path).run_pipeline()

@@ -30,7 +30,7 @@ class SpeechProcessingPipeline:
     4. Returns diarized transcript
     """
 
-    def __init__(self, input_audio: str, num_speakers: int = 2, model: str = "medium"):
+    def __init__(self, input_audio: str, num_speakers: int = 2, model: str = "base"):
         self.input_audio = Path(input_audio)
         self.num_speakers = num_speakers
         self.model = model
@@ -174,8 +174,3 @@ class SpeechProcessingPipeline:
             logging.info("Downloading diarization config...")
             urllib.request.urlretrieve(url, path)
         return path
-
-if __name__ == "__main__":
-    pipeline = SpeechProcessingPipeline(input_audio="batman.mp3", num_speakers=2, model="base")
-    result = pipeline.run_pipeline()
-    print(result)
