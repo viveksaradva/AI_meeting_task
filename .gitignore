@@ -5,5 +5,5 @@
 *.json
 *.zip
 uploads/
-output.txt
+*.txt
 diar_infer_telephonic.yaml
