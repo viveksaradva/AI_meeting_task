@@ -74,24 +74,13 @@ class SegmenterAlgorithm:
         self.transcript = retrieve_transcript(meeting_id)
 
     def preprocess_text(self, text: str) -> str:
-        # First use the token-based classifier to identify and remove obvious disfluencies
-        results = self.disfluency_classifier(text)
-        char_mask = [True] * len(text)
-        for entity in results:
-            if "DIS" in entity.get("entity", "").upper():
-                for i in range(entity["start"], entity["end"]):
-                    if i < len(char_mask):
-                        char_mask[i] = False
-        cleaned_text = "".join([ch for ch, keep in zip(text, char_mask) if keep])
-        cleaned_text = " ".join(cleaned_text.split())
-
-        # Then use the LLM-based cleaner for more nuanced cleaning
+        # Use only the LLM-based cleaner for disfluency removal
         try:
-            llm_cleaned_text = self.disfluency_cleaner.clean(cleaned_text)
+            llm_cleaned_text = self.disfluency_cleaner.clean(text)
             return llm_cleaned_text
         except Exception as e:
-            logging.warning(f"LLM disfluency cleaning failed: {e}. Using token-based cleaning only.")
-            return cleaned_text
+            logging.warning(f"LLM disfluency cleaning failed: {e}. Returning original text.")
+            return text
 
     def embed_transcript(self) -> np.ndarray:
         # Add parallel processing for larger transcripts
