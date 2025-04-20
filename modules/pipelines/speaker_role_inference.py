@@ -1,8 +1,21 @@
+import os
+import json
+from dotenv import load_dotenv
+from modules.prompts import identify_speaker_role_prompt
 from modules.pipelines.speaker_diarization_based_transcription_pipeline import SpeechProcessingPipeline
 from modules.db.postgres import insert_transcript
 from modules.prompts import identify_speaker_role_prompt, format_transcript_for_roles
 from modules.llm import get_groq_response
-import json
+from langchain_groq import ChatGroq
+
+load_dotenv()
+
+# Instantiate your LLM (ChatGroq)
+chat = ChatGroq(
+    temperature = 0,
+    groq_api_key = os.getenv("GROQ_API_KEY"),
+    model_name = "llama-3.1-8b-instant"
+)
 
 class SpeakerRoleInferencePipeline:
     def __init__(self, audio_file_path: str):
@@ -44,10 +57,11 @@ class SpeakerRoleInferencePipeline:
     def identify_roles(self, samples):
         # return infer_speaker_roles(samples)  # Use your Groq LLM logic
         formatted = format_transcript_for_roles(samples)
-        prompt = identify_speaker_role_prompt(formatted)
-        
+        prompt = identify_speaker_role_prompt
+
         # logger.info("Calling Groq LLM to classify speaker roles...")
-        raw_response = get_groq_response(prompt)
+        chain = prompt | chat
+        raw_response = chain.invoke({"formatted_transcript": formatted})
 
         try:
             role_mapping = json.loads(raw_response)

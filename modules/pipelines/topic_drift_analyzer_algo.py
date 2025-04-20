@@ -29,9 +29,20 @@ class DisfluencyCleaner:
     def __init__(self):
         self.chain = llm_powered_disfluency_cleaner_prompt | chat
 
+    @sleep_and_retry
+    @limits(calls=10, period=60)  # 10 calls per minute (60 seconds)
     def clean(self, text: str) -> str:
-        response = self.chain.invoke({"disfluenced_text": text})
-        return response.content
+        try:
+            response = self.chain.invoke({"disfluenced_text": text})
+            # Handle different response formats
+            if hasattr(response, 'content'):
+                return response.content
+            else:
+                return response
+        except Exception as e:
+            logging.error(f"Error in DisfluencyCleaner: {e}")
+            # Return the original text on error
+            return text
 
 class SegmentValidator:
     def __init__(self):
@@ -40,12 +51,24 @@ class SegmentValidator:
     @sleep_and_retry
     @limits(calls=10, period=60)  # 10 calls per minute (60 seconds)
     def validate(self, prev_context: str, curr_context: str) -> float:
-        response = self.chain.invoke({
-            "prev_context": prev_context,
-            "curr_context": curr_context
-        })
-        parsed = json.loads(response.content)
-        return float(parsed.get("confidence", 0))
+        try:
+            response = self.chain.invoke({
+                "prev_context": prev_context,
+                "curr_context": curr_context
+            })
+            # Handle different response formats
+            if hasattr(response, 'content'):
+                content = response.content
+            else:
+                content = response
+
+            # Parse the JSON response
+            parsed = json.loads(content)
+            return float(parsed.get("confidence", 0))
+        except Exception as e:
+            logging.error(f"Error in SegmentValidator: {e}")
+            # Return a default confidence of 0 on error
+            return 0.0
 
 ##############################################################
 # The SegmenterAlgorithm class for segmenting the transcript #
@@ -193,28 +216,3 @@ class SegmenterAlgorithm:
                 segment["boundary_confidence"] = confidence  # Store the confidence score
 
         return validated_segments
-
-
-if __name__ == "__main__":
-    segmenter = SegmenterAlgorithm()
-    segmenter.load_transcript(meeting_id="1f253dcb-2838-48b9-8ef1-73e70259f116")
-    # segmenter.load_transcript()
-    segmenter.embed_transcript()
-    segmenter.cluster_transcript()
-    segments = segmenter.build_segments_from_labels()
-
-    # Optionally, print original segments before LLM validation.
-    print("\n--- Original Segments ---")
-    for idx, seg in enumerate(segments):
-        print(f"\nSegment {idx} (Label {seg['label']}):")
-        for utt in seg["utterances"]:
-            print(f"{utt['speaker']}: {utt['utterance']}")
-
-    # Apply LLM-based augmented validation to refine segment boundaries.
-    validated_segments = segmenter.validate_segments_with_llm(segments, threshold=7.0)
-
-    print("\n--- Validated Segments (After LLM Augmented Validation) ---")
-    for idx, seg in enumerate(validated_segments):
-        print(f"\nSegment {idx} (Label {seg.get('label', 'merged')}):")
-        for utt in seg["utterances"]:
-            print(f"{utt['speaker']}: {utt['utterance']}")

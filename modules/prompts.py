@@ -30,19 +30,22 @@ llm_powered_disfluency_cleaner_prompt = ChatPromptTemplate.from_messages([
     ("human", "Please clean the following disfluent text: {disfluenced_text}")
 ])
 
+system_message = (
+    "You are an assistant that compares two transcript contexts to assess topic drift.\n"
+    "Your goal is to determine if there is a significant shift in topic.\n\n"
+    "Return your response in the following strict JSON format:\n"
+    "{{{{\n"
+    "  \"confidence\": 0-10,\n"
+    "  \"explanation\": \"<brief explanation>\"\n"
+    "}}}}\n\n"
+    "Follow these rules:\n"
+    "1. NEVER use markdown code blocks (```json or ```)\n"
+    "2. ALWAYS return raw JSON without any wrapping characters\n"
+    "3. ALWAYS return valid JSON"
+)
+
+
 llm_augmented_segment_validator_prompt = ChatPromptTemplate.from_messages([
-    ("system", 
-     "You are an assistant that compares two transcript contexts to assess topic drift.\n"
-     "Your goal is to determine if there is a significant shift in topic.\n\n"
-     "Return your response in the following strict JSON format:\n"
-     "{\n"
-     "  \"confidence\": <a number between 0 and 10>,\n"
-     "  \"explanation\": \"<a brief sentence explaining the level of topic drift>\"\n"
-     "}\n\n"
-     "Follow these rules:\n"
-     "1. NEVER use markdown code blocks (```json or ```)\n"
-     "2. ALWAYS return raw JSON without any wrapping characters\n"
-     "3. ALWAYS return valid JSON"
-    ),
+    ("system", system_message),
     ("human", "Context 1: {prev_context}\n\nContext 2: {curr_context}")
 ])
