@@ -12,7 +12,9 @@ from langchain_groq import ChatGroq
 from ratelimit import limits, sleep_and_retry
 from concurrent.futures import ThreadPoolExecutor
 from modules.db.postgres import retrieve_transcript
-from modules.prompts import llm_powered_disfluency_cleaner_prompt, llm_augmented_segment_validator_prompt
+from modules.prompts import (
+    llm_powered_disfluency_cleaner_prompt, llm_augmented_segment_validator_prompt
+)
 
 load_dotenv()
 
@@ -29,46 +31,23 @@ class DisfluencyCleaner:
     def __init__(self):
         self.chain = llm_powered_disfluency_cleaner_prompt | chat
 
-    @sleep_and_retry
-    @limits(calls=10, period=60)  # 10 calls per minute (60 seconds)
     def clean(self, text: str) -> str:
-        try:
-            response = self.chain.invoke({"disfluenced_text": text})
-            # Handle different response formats
-            if hasattr(response, 'content'):
-                return response.content
-            else:
-                return response
-        except Exception as e:
-            logging.error(f"Error in DisfluencyCleaner: {e}")
-            # Return the original text on error
-            return text
+        response = self.chain.invoke({"disfluenced_text": text})
+        return response.content
 
 class SegmentValidator:
     def __init__(self):
         self.chain = llm_augmented_segment_validator_prompt | chat
 
     @sleep_and_retry
-    @limits(calls=10, period=60)  # 10 calls per minute (60 seconds)
+    @limits(calls=10, period=60)
     def validate(self, prev_context: str, curr_context: str) -> float:
-        try:
-            response = self.chain.invoke({
-                "prev_context": prev_context,
-                "curr_context": curr_context
-            })
-            # Handle different response formats
-            if hasattr(response, 'content'):
-                content = response.content
-            else:
-                content = response
-
-            # Parse the JSON response
-            parsed = json.loads(content)
-            return float(parsed.get("confidence", 0))
-        except Exception as e:
-            logging.error(f"Error in SegmentValidator: {e}")
-            # Return a default confidence of 0 on error
-            return 0.0
+        response = self.chain.invoke({
+            "prev_context": prev_context,
+            "curr_context": curr_context
+        })
+        parsed = json.loads(response.content)
+        return float(parsed.get("confidence", 0))
 
 ##############################################################
 # The SegmenterAlgorithm class for segmenting the transcript #
@@ -78,9 +57,6 @@ class SegmenterAlgorithm:
         self.transcript: List[Dict[str, str]] = []
         self.embedding_model = embedding_model
         self.llm_validator_model = llm_validator_model
-        self.disfluency_classifier = pipeline("token-classification",
-                                              model="4i-ai/BERT_disfluency_cls",
-                                              aggregation_strategy="simple")
         self.disfluency_cleaner = DisfluencyCleaner()
         self.embeddings = None
         self.labels = None
@@ -154,65 +130,71 @@ class SegmenterAlgorithm:
         return self.labels
 
     def build_segments_from_labels(self) -> List[Dict]:
-        """
-        Groups utterances into segments based on HDBSCAN cluster labels.
-        Returns a list of segments where each segment contains utterances from the same cluster.
-        """
         if self.labels is None:
-            raise ValueError("No cluster labels found. Please run cluster_transcript() first.")
+            raise ValueError("No cluster labels. Run cluster_transcript() first.")
+        if len(self.labels) != len(self.transcript):
+            raise ValueError("Transcript/labels length mismatch.")
 
-        if len(self.transcript) != len(self.labels):
-            raise ValueError("Mismatch between transcript and label lengths.")
+        # Group by label, track original index
+        clusters: Dict[int, List[Dict]] = {}
+        noise_buffer = []
+        for idx, (entry, lbl) in enumerate(zip(self.transcript, self.labels)):
+            entry["_index"] = idx
+            if lbl == -1:
+                noise_buffer.append(entry)
+            else:
+                clusters.setdefault(lbl, []).append(entry)
+                # flush any buffered noise into this cluster
+                if noise_buffer:
+                    clusters[lbl].extend(noise_buffer)
+                    noise_buffer = []
 
-        segments = {}
-        for entry, label in zip(self.transcript, self.labels):
-            if label == -1:
-                continue  # Skip noise
-            segments.setdefault(label, []).append(entry)
+        # any trailing noise → last cluster
+        if noise_buffer and clusters:
+            last_lbl = sorted(clusters.keys())[-1]
+            clusters[last_lbl].extend(noise_buffer)
 
-        # Sort segments by the first utterance index to preserve rough order
-        ordered_segments = sorted(segments.items(), key=lambda kv: self.labels.tolist().index(kv[0]))
+        # Sort clusters by earliest utterance index
+        ordered = sorted(
+            clusters.items(),
+            key=lambda kv: min(u["_index"] for u in kv[1])
+        )
 
-        # Convert to list of dicts
-        return [{"label": label, "utterances": utterances} for label, utterances in ordered_segments]
+        # Emit segments list
+        segments = []
+        for lbl, utts in ordered:
+            # strip our helper field
+            for u in utts: u.pop("_index", None)
+            segments.append({"label": lbl, "utterances": utts})
+        return segments
 
-    def validate_segments_with_llm(self, segments: List[Dict], threshold: float = 7.0) -> List[Dict]:
+    def validate_segments_with_llm(self, segments: List[Dict], percentile: float = 75.0) -> List[Dict]:
         if len(segments) < 2:
             return segments
 
         # Initialize the segment validator
         validator = SegmentValidator()
 
-        validated_segments = [segments[0]]
-        for i in range(1, len(segments)):
-            prev_segment = validated_segments[-1]
-            current_segment = segments[i]
+        # Collect all boundary confidences
+        boundary_confs = []
+        for prev, curr in zip(segments, segments[1:]):
+            ctx_prev = " ".join(u["utterance"] for u in prev["utterances"][-3:])
+            ctx_curr = " ".join(u["utterance"] for u in curr["utterances"][:3])
+            conf = validator.validate(ctx_prev, ctx_curr)
+            boundary_confs.append(conf)
 
-            # Extract contexts: use up to 3 utterances from end of previous segment and beginning of the current segment
-            context_prev = " ".join([utt["utterance"] for utt in prev_segment["utterances"][-3:]])
-            context_curr = " ".join([utt["utterance"] for utt in current_segment["utterances"][:3]])
+        # Compute dynamic threshold
+        threshold = float(np.percentile(boundary_confs, percentile))
 
-            try:
-                # Use the SegmentValidator to get the confidence score
-                confidence = validator.validate(context_prev, context_curr)
-            except Exception as e:
-                logging.error(f"Error calling LLM validator: {e}")
-                # In case of failure, default to merging the segments to be conservative.
-                validated_segments[-1]["utterances"].extend(current_segment["utterances"])
-                continue
-
-            logging.info(f"LLM confidence for boundary between segments {prev_segment['label']} and {current_segment['label']}: {confidence}")
-
-            if confidence >= threshold:
-                # Accept the boundary as a valid topic drift.
-                validated_segments.append(current_segment)
+        # Re‑walk and build validated segments with proper confidences
+        validated = [segments[0]]
+        for idx, seg in enumerate(segments[1:], start=1):
+            conf = boundary_confs[idx - 1]
+            if conf >= threshold:
+                seg["boundary_confidence"] = conf
+                validated.append(seg)
             else:
-                # Merge the segments if the topic drift is not strongly supported.
-                validated_segments[-1]["utterances"].extend(current_segment["utterances"])
+                # merge low‑confidence drift
+                validated[-1]["utterances"].extend(seg["utterances"])
 
-        # Add confidence scores to output
-        for i, segment in enumerate(validated_segments):
-            if i > 0:
-                segment["boundary_confidence"] = confidence  # Store the confidence score
-
-        return validated_segments
+        return validated
