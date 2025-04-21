@@ -32,16 +32,16 @@ def get_connection():
 
 def insert_transcript(transcript: List[Dict], meeting_id: str = None):
     """
-    Inserts transcript into the `meeting_transcripts` table.
+    Inserts transcript into the `test_meeting_transcripts` table.
 
-    Each entry must contain: speaker, role, start, end, transcription.
+    Each entry must contain: speaker, utterance, start, end.
     """
     meeting_id = meeting_id or str(uuid.uuid4())
 
-    logger.info(f"Inserting transcript for meeting_id: {meeting_id}")
+    logger.info(f"Inserting test transcript for meeting_id: {meeting_id}")
 
     query = """
-    INSERT INTO meeting_transcripts (meeting_id, speaker_label, utterance, start, "end")
+    INSERT INTO test_meeting_transcripts (meeting_id, speaker, utterance, start_time, end_time)
     VALUES (%s, %s, %s, %s, %s)
     """
 
@@ -60,7 +60,7 @@ def insert_transcript(transcript: List[Dict], meeting_id: str = None):
                 logger.error(f"Insert failed for entry {entry}: {e}")
         cursor.close()
 
-    logger.info(f"Inserted {len(transcript)} rows for meeting {meeting_id}")
+    logger.info(f"Inserted {len(transcript)} rows into test_meeting_transcripts for meeting {meeting_id}")
     return meeting_id
 
 def retrieve_transcript(meeting_id: str) -> List[Dict]:
@@ -75,25 +75,25 @@ def retrieve_transcript(meeting_id: str) -> List[Dict]:
     WHERE meeting_id = %s
     """
 
-    transcript = []
     with get_connection() as conn:
         cursor = conn.cursor()
-        try:
-            cursor.execute(query, (meeting_id,))
-            rows = cursor.fetchall()
-            for row in rows:
-                transcript.append({
-                    'speaker': row[0],
-                    'start': row[1],
-                    'end': row[2],
-                    'utterance': row[3]
-                })
-        except Exception as e:
-            logger.error(f"Retrieval failed for meeting_id {meeting_id}: {e}")
+        cursor.execute("""
+            SELECT speaker, utterance, start_time, end_time
+            FROM test_meeting_transcripts
+            WHERE meeting_id = %s
+            ORDER BY start_time ASC
+        """, (meeting_id,))
+        
+        rows = cursor.fetchall()
         cursor.close()
-
-    logger.info(f"Retrieved {len(transcript)} rows for meeting {meeting_id}")
-    return transcript
-
-if __name__ == "__main__":
-    print(retrieve_transcript(meeting_id="8753b367-ae49-4763-a860-64663b34ef83"))
+        conn.close()
+        
+        return [
+            {
+                "speaker": row[0],
+                "utterance": row[1],
+                "start": float(row[2]),
+                "end": float(row[3])
+            }
+            for row in rows
+        ]

@@ -7,7 +7,6 @@ import requests
 import numpy as np
 from typing import List, Dict
 from dotenv import load_dotenv
-from transformers import pipeline
 from langchain_groq import ChatGroq
 from ratelimit import limits, sleep_and_retry
 from concurrent.futures import ThreadPoolExecutor
@@ -167,15 +166,12 @@ class SegmenterAlgorithm:
             for u in utts: u.pop("_index", None)
             segments.append({"label": lbl, "utterances": utts})
         return segments
-
+    
     def validate_segments_with_llm(self, segments: List[Dict], percentile: float = 75.0) -> List[Dict]:
         if len(segments) < 2:
             return segments
 
-        # Initialize the segment validator
         validator = SegmentValidator()
-
-        # Collect all boundary confidences
         boundary_confs = []
         for prev, curr in zip(segments, segments[1:]):
             ctx_prev = " ".join(u["utterance"] for u in prev["utterances"][-3:])
@@ -183,18 +179,36 @@ class SegmenterAlgorithm:
             conf = validator.validate(ctx_prev, ctx_curr)
             boundary_confs.append(conf)
 
-        # Compute dynamic threshold
         threshold = float(np.percentile(boundary_confs, percentile))
 
-        # Re‑walk and build validated segments with proper confidences
-        validated = [segments[0]]
-        for idx, seg in enumerate(segments[1:], start=1):
-            conf = boundary_confs[idx - 1]
-            if conf >= threshold:
-                seg["boundary_confidence"] = conf
-                validated.append(seg)
-            else:
-                # merge low‑confidence drift
-                validated[-1]["utterances"].extend(seg["utterances"])
+        # Perform segment splitting based on confidence
+        validated_segments = []
+        curr_segment = {
+            "label": 0,
+            "utterances": segments[0]["utterances"]
+        }
 
-        return validated
+        for idx in range(1, len(segments)):
+            confidence = boundary_confs[idx - 1]
+            next_segment = segments[idx]
+
+            if confidence >= threshold:
+                # Boundary is valid: split into a new segment
+                validated_segments.append(curr_segment)
+                curr_segment = {
+                    "label": len(validated_segments),
+                    "utterances": next_segment["utterances"]
+                }
+            else:
+                # Boundary is weak: merge next utterances into current segment
+                curr_segment["utterances"].extend(next_segment["utterances"])
+
+        # Append the last segment
+        validated_segments.append(curr_segment)
+
+        # Annotate confidence only for true splits
+        for i, conf in enumerate(boundary_confs):
+            if conf >= threshold and i + 1 < len(validated_segments):
+                validated_segments[i + 1]["boundary_confidence"] = conf
+
+        return validated_segments

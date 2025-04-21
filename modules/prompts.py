@@ -35,14 +35,24 @@ llm_augmented_segment_validator_prompt = ChatPromptTemplate.from_messages([
      "You are an assistant that compares two transcript contexts to assess topic drift.\n"
      "Your goal is to determine if there is a significant shift in topic.\n\n"
      "Return your response in the following strict JSON format:\n"
-     "{\n"
+     "{{\n"
      "  \"confidence\": <a number between 0 and 10>,\n"
      "  \"explanation\": \"<a brief sentence explaining the level of topic drift>\"\n"
-     "}\n\n"
+     "}}\n\n"
      "Follow these rules:\n"
      "1. NEVER use markdown code blocks (```json or ```)\n"
      "2. ALWAYS return raw JSON without any wrapping characters\n"
      "3. ALWAYS return valid JSON"
     ),
     ("human", "Context 1: {prev_context}\n\nContext 2: {curr_context}")
+])
+
+summarizer = ChatPromptTemplate.from_messages([
+    ("system", "You are a meeting summarizer. Your task is to generate a concise summary of the meeting transcript provided below. "
+    "The summary should capture the main points, decisions, and actions discussed during the meeting. "
+    "Ensure that the summary is clear, coherent, and easy to understand. "
+    "Avoid including any personal opinions or biases in the summary. "
+    "The summary should be no longer than 100 words. "
+    "Return only the summary text without any additional formatting or instructions."),
+    ("human", "Transcript:\n{formatted_transcript}")
 ])
