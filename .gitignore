@@ -7,4 +7,4 @@
 uploads/
 *.txt
 diar_infer_telephonic.yaml
-test_*
+**test_*

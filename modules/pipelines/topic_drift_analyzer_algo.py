@@ -162,8 +162,11 @@ class SegmenterAlgorithm:
         # Emit segments list
         segments = []
         for lbl, utts in ordered:
-            # strip our helper field
-            for u in utts: u.pop("_index", None)
+            # Remove helper index
+            for u in utts:
+                u.pop("_index", None)
+            # Sort by start timestamp
+            utts = sorted(utts, key=lambda u: u["start"])
             segments.append({"label": lbl, "utterances": utts})
         return segments
     
