@@ -2,6 +2,7 @@ import os
 import umap
 import json
 import hdbscan
+# from sklearn.cluster import DBSCAN
 import logging
 import requests
 import numpy as np
@@ -10,12 +11,14 @@ from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from ratelimit import limits, sleep_and_retry
 from concurrent.futures import ThreadPoolExecutor
+# from sentence_transformers import SentenceTransformer
 from modules.db.postgres import retrieve_transcript
 from modules.prompts import (
     llm_powered_disfluency_cleaner_prompt, llm_augmented_segment_validator_prompt
 )
 
 load_dotenv()
+# sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 #############################
 # For cleaning disfluencies #
@@ -101,7 +104,7 @@ class SegmenterAlgorithm:
         self.embeddings = np.array(embeddings)
         return self.embeddings
 
-    def reduce_dimensions(self, n_neighbors=15, min_dist=0.0, n_components=5, metric='cosine'):
+    def reduce_dimensions(self, n_neighbors=15, min_dist=0.0, n_components=15, metric='cosine'):
         """
         Reduce dimensionality of embeddings using UMAP.
         """
@@ -127,6 +130,21 @@ class SegmenterAlgorithm:
         self.labels = clusterer.fit_predict(reduced_embeddings)
         logging.info(f"Identified {len(set(self.labels)) - (1 if -1 in self.labels else 0)} clusters (excluding noise).")
         return self.labels
+    # def cluster_transcript(self, eps=0.8, min_samples=3):
+    #     """
+    #     Cluster the transcript using DBSCAN with adaptive parameters.
+    #     """
+    #     reduced_embeddings = self.reduce_dimensions()
+
+    #     # Adaptive min_samples based on transcript length
+    #     if min_samples is None:
+    #         min_samples = max(3, len(self.transcript) // 20)
+
+    #     clusterer = DBSCAN(eps=eps, min_samples=min_samples, metric='cosine')
+    #     self.labels = clusterer.fit_predict(reduced_embeddings)
+    #     logging.info(f"Identified {len(set(self.labels)) - (1 if -1 in self.labels else 0)} clusters (excluding noise).")
+    #     return self.labels
+
 
     def build_segments_from_labels(self) -> List[Dict]:
         if self.labels is None:

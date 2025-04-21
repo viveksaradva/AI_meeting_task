@@ -13,6 +13,18 @@ logger = logging.getLogger(__name__)
 
 @contextmanager
 def get_connection():
+    """
+    Context manager to handle a Postgres database connection.
+
+    The connection is established using the environment variables
+    POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_HOST and POSTGRES_PORT.
+
+    If the connection fails, an exception is raised.
+
+    The connection is committed after the context is exited normally.
+
+    The connection is closed at the end of the context, whether it was exited normally or not.
+    """
     try:
         conn = psycopg2.connect(
             dbname=os.getenv("POSTGRES_DB"),
